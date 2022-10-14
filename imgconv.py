@@ -22,7 +22,20 @@ for x in range(250):
 print("Zones: ", zone_total)
 
 with open("img.h", "wt") as f:
+    f.write("""
+struct ZoneDef {
+    int offset;
+    int width;
+    int height;
+    const uint8_t* data;
+};
+""")
+    zone_dims = []
     for zone_id in range(zone_total):
+        xmin = 250
+        xmax = 0
+        ymin = 122
+        ymax = 0
         result = []
         for x in range(250):
             for row in range(16):
@@ -34,12 +47,25 @@ with open("img.h", "wt") as f:
                         pix = 0
                     if pix != zone_id + 1:
                         value |= 0x80 >> y
+                    else:
+                        xmin = min(x, xmin)
+                        xmax = max(x, xmax)
+                        ymin = min(row, ymin)
+                        ymax = max(row, ymax)
                 result.append(value)
-        f.write("const uint8_t ZONE_%d[] = {\n" % (zone_id))
-        for n in result:
-            f.write(f"0x{n:02x},")
+        w = xmax - xmin + 1
+        h = ymax - ymin + 1
+        zone_dims.append((xmin, ymin, w, h))
+        f.write(f"const uint8_t ZONE_DATA_{zone_id}[] = {{\n")
+        for x in range(xmin, xmax + 1):
+            for y in range(ymin, ymax + 1):
+                f.write(f"0x{result[x*16+y]:02x},")
+            f.write("\n")
         f.write("};\n");
-    f.write("const uint8_t* ZONES[] = {")
-    for zone_id in range(zone_total):
-        f.write("ZONE_%d, " % (zone_id))
+    
+    f.write("const ZoneDef ZONES[] = {\n")
+    for zone_id, (x, y, w, h) in enumerate(zone_dims):
+        print(zone_id, x, y, w, h)
+        offset = x * 16 + y
+        f.write(f"  {{{offset}, {w}, {h}, ZONE_DATA_{zone_id}}},\n")
     f.write("};\n");
