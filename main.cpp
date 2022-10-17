@@ -12,13 +12,13 @@
 
 #include "img.h"
 
-#define UP 0x01
-#define UL 0x02
-#define UR 0x04
+#define UP 0x04
+#define UL 0x01
+#define UR 0x20
 #define MD 0x08
-#define DL 0x10
-#define DR 0x20
-#define DN 0x40
+#define DL 0x02
+#define DR 0x40
+#define DN 0x10
 uint8_t dec_to_segments[10] = {
     UP | UL | UR | DL | DR | DN,
     UR | DR,
@@ -31,39 +31,36 @@ uint8_t dec_to_segments[10] = {
     UP | UL | UR | MD | DL | DR | DN,
     UP | UL | UR | MD | DR | DN,
 };
-uint8_t segment_to_zone[] = {
-    21 + 0, // UP
-    21 + 1, // UL
-    21 + 6, // UR
-    21 + 4, // MD
-    21 + 2, // DL
-    21 + 5, // DR
-    21 + 3, // DN
 
-    14 + 3, // UP
-    14 + 0, // UL
-    14 + 5, // UR
-    14 + 4, // MD
-    14 + 1, // DL
-    14 + 6, // DR
-    14 + 2, // DN
 
-    7 + 3, // UP
-    7 + 0, // UL
-    7 + 5, // UR
-    7 + 4, // MD
-    7 + 1, // DL
-    7 + 6, // DR
-    7 + 2, // DN
+void draw7seg(int zone_offset, int value, float to_next_fraction)
+{
+    for(int n=0; n<7; n++) {
+        auto& zone = ZONES[n + zone_offset];
+        if (dec_to_segments[value] & (1 << n)) {
+            int offset = zone.offset;
+            for(int x=0; x<zone.width; x++)
+                for(int y=0; y<zone.height; y++)
+                    epaper_buffer[offset + x * 16 + y] &= zone.data[x*zone.height+y];
 
-    3, // UP
-    0, // UL
-    5, // UR
-    4, // MD
-    1, // DL
-    6, // DR
-    2, // DN
-};
+            if (!(dec_to_segments[(value + 1) % 10] & (1 << n))) {
+                //Next segment step will be off, so hide this line.
+                for(int tmp=0; tmp<zone.line_length * to_next_fraction; tmp++) {
+                    auto p = zone.line[tmp];
+                    epaper_buffer[p.x * 16 + p.y / 8] |= (0x80 >> (p.y % 8));
+                }
+            }
+        } else {
+            if ((dec_to_segments[(value + 1) % 10] & (1 << n))) {
+                //Next segment step will be on, so show this line.
+                for(int tmp=0; tmp<zone.line_length * to_next_fraction; tmp++) {
+                    auto p = zone.line[tmp];
+                    epaper_buffer[p.x * 16 + p.y / 8] &=~(0x80 >> (p.y % 8));
+                }
+            }
+        }
+    }
+}
 
 
 int main() {
@@ -97,7 +94,7 @@ int main() {
     epaper_prepare_partial();
 
     auto last_sec = t.sec;
-    while(!stdio_usb_connected())
+    while(true)
     {
         while(t.sec == last_sec) {
             rtc_get_datetime(&t);
@@ -106,39 +103,11 @@ int main() {
         last_sec = t.sec;
 
         memset(epaper_buffer, 0xFF, sizeof(epaper_buffer));
-        for(int n=0; n<7; n++) {
-            if (dec_to_segments[t.sec % 10] & (1 << n)) {
-                auto& zone = ZONES[segment_to_zone[n]];
-                int offset = zone.offset;
-                for(int x=0; x<zone.width; x++)
-                    for(int y=0; y<zone.height; y++)
-                        epaper_buffer[offset + x * 16 + y] &= zone.data[x*zone.height+y];
-            }
+        draw7seg(21, t.sec % 10, 0.5f);
+        draw7seg(14, t.sec / 10, float(t.sec % 10) / 10.0f);
+        draw7seg( 7, t.min % 10, float(t.sec) / 60.0f);
+        draw7seg( 0, t.min / 10, float(t.sec + (t.min % 10) * 60) / 600.0f);
 
-            if (dec_to_segments[t.sec / 10] & (1 << n)) {
-                auto& zone = ZONES[segment_to_zone[n + 7]];
-                int offset = zone.offset;
-                for(int x=0; x<zone.width; x++)
-                    for(int y=0; y<zone.height; y++)
-                        epaper_buffer[offset + x * 16 + y] &= zone.data[x*zone.height+y];
-            }
-
-            if (dec_to_segments[t.min % 10] & (1 << n)) {
-                auto& zone = ZONES[segment_to_zone[n + 14]];
-                int offset = zone.offset;
-                for(int x=0; x<zone.width; x++)
-                    for(int y=0; y<zone.height; y++)
-                        epaper_buffer[offset + x * 16 + y] &= zone.data[x*zone.height+y];
-            }
-
-            if (dec_to_segments[t.min / 10] & (1 << n)) {
-                auto& zone = ZONES[segment_to_zone[n + 21]];
-                int offset = zone.offset;
-                for(int x=0; x<zone.width; x++)
-                    for(int y=0; y<zone.height; y++)
-                        epaper_buffer[offset + x * 16 + y] &= zone.data[x*zone.height+y];
-            }
-        }
         epaper_partial_refresh();
     }
     epaper_sleep();
